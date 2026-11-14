@@ -21,6 +21,8 @@ export interface Signal {
   divergence: number;
   winRatePct: number | null; // null if not enough backtest history
   sampleSize: number; // number of past occurrences used for the win rate
+  historicalPips: number | null; // cumulative backtested pips; null if sample too thin
+  confirmationCount: number; // how many other monitored relationships are also diverging right now
   asOf: string;
 }
 
@@ -38,12 +40,25 @@ export interface RelationshipStatus {
   triggered: boolean;
 }
 
+export interface MarketOverviewRow {
+  symbol: string;
+  lastPrice: number | null;
+  changePct: number | null;
+}
+
 export interface DashboardData {
   asOf: string;
-  dataFetchedAt: string; // when the underlying market data was actually fetched (cache-aware)
   isMockData: boolean;
-  strengths: CurrencyStrength[];
+  timeframe: string; // the timeframe label in effect for the intraday panels, e.g. "H1"
+  // Signals/backtest run on long daily history (see marketData.ts getDailySeries).
+  dailyDataFetchedAt: string;
   signals: Signal[];
   relationships: RelationshipStatus[];
+  // Currency Flow Map + Strength Ranking + Market Overview run on short
+  // intraday history at the selected timeframe, for a "live" feel, kept
+  // separate from the backtest so it stays reliable regardless of timeframe.
+  intradayDataFetchedAt: string;
+  strengths: CurrencyStrength[];
+  marketOverview: MarketOverviewRow[];
   gold: GoldPoint[];
 }

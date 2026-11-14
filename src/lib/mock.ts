@@ -32,6 +32,13 @@ const BASE_PRICE: Record<string, number> = {
   "AUD/USD": 0.65,
   "NZD/USD": 0.6,
   "EUR/GBP": 0.85,
+  "EUR/JPY": 163.6,
+  "GBP/JPY": 192.4,
+  "GBP/CAD": 1.73,
+  "AUD/NZD": 1.08,
+  "AUD/CAD": 0.88,
+  "NZD/CHF": 0.53,
+  "CAD/CHF": 0.65,
   [GOLD_SYMBOL]: 2350,
 };
 
@@ -68,6 +75,27 @@ export function generateMockSeries(): SeriesBySymbol {
       drift += noise + usdContribution * 0.02;
       const close = base * (1 + drift);
       const date = new Date(Date.now() - (DAYS - i) * 86400000).toISOString().slice(0, 10);
+      bars.push({ date, close: Number(close.toFixed(5)) });
+    }
+    out[symbol] = bars;
+  }
+  return out;
+}
+
+// Mock intraday series (for the live Currency Flow Map / Strength Ranking /
+// Market Overview display), separate from the daily backtest series above.
+export function generateMockIntradaySeries(bars_: number = 48): SeriesBySymbol {
+  const out: SeriesBySymbol = {};
+  const now = Date.now();
+  for (const symbol of ALL_SYMBOLS) {
+    const rng = mulberry32(seedFromSymbol(symbol) ^ 0x51ed270b);
+    const base = BASE_PRICE[symbol] ?? 1;
+    const bars: Bar[] = [];
+    let drift = 0;
+    for (let i = 0; i < bars_; i++) {
+      drift += (rng() - 0.5) * 0.0015;
+      const close = base * (1 + drift);
+      const date = new Date(now - (bars_ - i) * 15 * 60000).toISOString();
       bars.push({ date, close: Number(close.toFixed(5)) });
     }
     out[symbol] = bars;

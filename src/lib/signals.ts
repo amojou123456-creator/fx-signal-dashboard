@@ -22,10 +22,16 @@ import {
   DIVERGENCE_THRESHOLD,
   LOOKBACK_BASELINE,
   LOOKBACK_SHORT,
+  MIN_CONFIRMATIONS,
   MIN_SAMPLE_SIZE,
   RELATIONSHIPS,
 } from "./config";
 import type { Bar, SeriesBySymbol, Signal } from "./types";
+
+// Standard FX pip conventions: 0.01 for JPY crosses and gold, 0.0001 otherwise.
+function pipSize(symbol: string): number {
+  return symbol.includes("JPY") || symbol.startsWith("XAU") ? 0.01 : 0.0001;
+}
 
 function toReturns(bars: Bar[]): number[] {
   const out: number[] = [];
@@ -99,17 +105,20 @@ function checkDivergence(
 }
 
 function backtestWinRate(
+  pairSymbol: string,
   bars: Bar[],
   returnsA: number[],
   returnsB: number[],
   sign: 1 | -1
-): { winRatePct: number | null; sampleSize: number } {
+): { winRatePct: number | null; sampleSize: number; historicalPips: number | null } {
   const minStart = LOOKBACK_BASELINE;
   const maxEnd = returnsA.length - BACKTEST_HORIZON_BARS;
   const earliestEnd = Math.max(minStart, returnsA.length - BACKTEST_LOOKBACK_DAYS);
+  const pip = pipSize(pairSymbol);
 
   let wins = 0;
   let total = 0;
+  let totalPips = 0;
 
   for (let end = earliestEnd; end < maxEnd; end++) {
     const check = checkDivergence(returnsA, returnsB, sign, end);
@@ -121,17 +130,25 @@ function backtestWinRate(
     const priceAfter = bars[end + BACKTEST_HORIZON_BARS]?.close;
     if (priceAtSignal == null || priceAfter == null) continue;
 
-    const moved = priceAfter > priceAtSignal;
+    const priceDiff = priceAfter - priceAtSignal;
+    const moved = priceDiff > 0;
     const won = check.direction === "BUY" ? moved : !moved;
+    const signedPips = (check.direction === "BUY" ? priceDiff : -priceDiff) / pip;
+
     total += 1;
+    totalPips += signedPips;
     if (won) wins += 1;
   }
 
-  // Below MIN_SAMPLE_SIZE fired events, a win rate is statistically unreliable
-  // and showing a confident-looking percentage would be misleading — the UI
-  // shows "insufficient history" instead when winRatePct is null.
-  const winRatePct = total >= MIN_SAMPLE_SIZE ? Number(((wins / total) * 100).toFixed(1)) : null;
-  return { winRatePct, sampleSize: total };
+  // Below MIN_SAMPLE_SIZE fired events, a win rate (and pip total) is
+  // statistically unreliable and showing a confident-looking number would be
+  // misleading — the UI shows "insufficient history" instead.
+  const reliable = total >= MIN_SAMPLE_SIZE;
+  return {
+    winRatePct: reliable ? Number(((wins / total) * 100).toFixed(1)) : null,
+    sampleSize: total,
+    historicalPips: reliable ? Number(totalPips.toFixed(1)) : null,
+  };
 }
 
 export interface RelationshipStatus {
@@ -165,7 +182,7 @@ export function computeRelationshipStatuses(series: SeriesBySymbol): Relationshi
 }
 
 export function computeSignals(series: SeriesBySymbol, asOf: string): Signal[] {
-  const signals: Signal[] = [];
+  const candidates: Signal[] = [];
 
   for (const rel of RELATIONSHIPS) {
     const barsA = series[rel.a];
@@ -178,9 +195,9 @@ export function computeSignals(series: SeriesBySymbol, asOf: string): Signal[] {
     const live = checkDivergence(returnsA, returnsB, rel.sign, returnsA.length);
     if (!live.triggered || !live.direction) continue;
 
-    const { winRatePct, sampleSize } = backtestWinRate(barsA, returnsA, returnsB, rel.sign);
+    const { winRatePct, sampleSize, historicalPips } = backtestWinRate(rel.a, barsA, returnsA, returnsB, rel.sign);
 
-    signals.push({
+    candidates.push({
       pair: rel.a,
       direction: live.direction,
       relationshipLabel: rel.label,
@@ -189,9 +206,19 @@ export function computeSignals(series: SeriesBySymbol, asOf: string): Signal[] {
       divergence: Number(live.divergence.toFixed(2)),
       winRatePct,
       sampleSize,
+      historicalPips,
+      confirmationCount: 0, // filled below, once every candidate is known
       asOf,
     });
   }
 
-  return signals;
+  // "Confirmation" (Module 5 spec: "Reject weak signals without sufficient
+  // confirmation") is computed here as real market breadth, not fabricated:
+  // how many OTHER monitored relationships are independently also showing a
+  // live divergence right now. Several unrelated relationships diverging at
+  // once is a broader, more meaningful signal than just one in isolation.
+  const confirmationCount = Math.max(0, candidates.length - 1);
+  return candidates
+    .map((c) => ({ ...c, confirmationCount }))
+    .filter((c) => c.confirmationCount >= MIN_CONFIRMATIONS);
 }
