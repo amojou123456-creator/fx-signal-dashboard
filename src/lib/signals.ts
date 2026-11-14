@@ -6,11 +6,15 @@
 // This is a known, simple heuristic (FX correlation/divergence trading) — not
 // a validated or guaranteed strategy. The win rate shown is computed from an
 // actual walk-forward backtest over real history, not an assumed number.
+// Bars across symbols are aligned by calendar date (see marketData.ts
+// alignByCalendarDate), not array position — fixed after an earlier version
+// aligned by index, which could silently misattribute a return on one symbol
+// to the wrong date on another if a provider gap ever desynced the arrays.
 //
-// Simplification (documented, to revisit in a later phase): bars across
-// symbols are aligned by array position, not by calendar date. Daily FX/gold
-// series are mostly aligned day-for-day; small date-key mismatches around
-// holidays are not corrected for in this version.
+// Still open (flagged by the review council, not yet addressed): no
+// null-baseline comparison, no expectancy/risk-reward accounting alongside
+// win rate, and no handling for a correlation relationship breaking down for
+// a real structural reason rather than reverting.
 
 import {
   BACKTEST_HORIZON_BARS,
@@ -18,6 +22,7 @@ import {
   DIVERGENCE_THRESHOLD,
   LOOKBACK_BASELINE,
   LOOKBACK_SHORT,
+  MIN_SAMPLE_SIZE,
   RELATIONSHIPS,
 } from "./config";
 import type { Bar, SeriesBySymbol, Signal } from "./types";
@@ -122,7 +127,11 @@ function backtestWinRate(
     if (won) wins += 1;
   }
 
-  return { winRatePct: total > 0 ? Number(((wins / total) * 100).toFixed(1)) : null, sampleSize: total };
+  // Below MIN_SAMPLE_SIZE fired events, a win rate is statistically unreliable
+  // and showing a confident-looking percentage would be misleading — the UI
+  // shows "insufficient history" instead when winRatePct is null.
+  const winRatePct = total >= MIN_SAMPLE_SIZE ? Number(((wins / total) * 100).toFixed(1)) : null;
+  return { winRatePct, sampleSize: total };
 }
 
 export interface RelationshipStatus {

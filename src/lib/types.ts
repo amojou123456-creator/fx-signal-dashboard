@@ -40,6 +40,7 @@ export interface RelationshipStatus {
 
 export interface DashboardData {
   asOf: string;
+  dataFetchedAt: string; // when the underlying market data was actually fetched (cache-aware)
   isMockData: boolean;
   strengths: CurrencyStrength[];
   signals: Signal[];

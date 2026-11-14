@@ -48,4 +48,9 @@ export const LOOKBACK_SHORT = 20; // bars, rolling correlation window
 export const LOOKBACK_BASELINE = 90; // bars, baseline correlation window
 export const DIVERGENCE_THRESHOLD = 0.5; // |rolling - expected| to flag a signal
 export const BACKTEST_HORIZON_BARS = 5; // bars ahead to judge whether a past signal "won"
-export const BACKTEST_LOOKBACK_DAYS = 90;
+// ~2 years of trading days. Widened from 90 days on the council's recommendation:
+// a 90-day window produced too few signal events to tell a real edge from noise.
+export const BACKTEST_LOOKBACK_DAYS = 500;
+// Below this many fired-signal events, a win rate is statistically meaningless —
+// hide/flag it instead of showing a confident-looking percentage from a tiny sample.
+export const MIN_SAMPLE_SIZE = 30;

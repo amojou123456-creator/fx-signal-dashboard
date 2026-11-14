@@ -44,13 +44,38 @@ function parseSeries(raw: SingleSymbolSeries, symbol: string): Bar[] {
 }
 
 function deriveCross(baseSeries: Bar[], quoteSeries: Bar[]): Bar[] {
-  // Position-aligned, consistent with the simplification documented in signals.ts.
+  // Called after alignByCalendarDate, so both arrays already share the same
+  // dates in the same order — safe to zip by position here.
   const len = Math.min(baseSeries.length, quoteSeries.length);
   const out: Bar[] = [];
   for (let i = 0; i < len; i++) {
     out.push({ date: baseSeries[i].date, close: baseSeries[i].close / quoteSeries[i].close });
   }
   return out;
+}
+
+// Fixes the index-alignment bug the council flagged: bars were previously
+// zipped by array position, so a missing/extra bar for any one symbol (a
+// data-provider gap, a holiday handled inconsistently) silently shifted every
+// downstream correlation and signal calculation without any error. This
+// keeps only the dates present in every tracked symbol, in calendar order.
+function alignByCalendarDate(series: SeriesBySymbol): SeriesBySymbol {
+  const symbols = Object.keys(series);
+  if (symbols.length === 0) return series;
+
+  const dateSetsPerSymbol: Set<string>[] = symbols.map(
+    (symbol) => new Set(series[symbol].map((b) => b.date))
+  );
+  const [firstDateSet, ...restDateSets] = dateSetsPerSymbol;
+  const commonDates = [...firstDateSet].filter((d) => restDateSets.every((s) => s.has(d)));
+  const sortedDates = commonDates.sort((a, b) => a.localeCompare(b));
+
+  const aligned: SeriesBySymbol = {};
+  for (const symbol of symbols) {
+    const bySymbolDate = new Map(series[symbol].map((b) => [b.date, b.close]));
+    aligned[symbol] = sortedDates.map((date) => ({ date, close: bySymbolDate.get(date)! }));
+  }
+  return aligned;
 }
 
 // Explicit in-memory cache (on top of Next's own fetch cache, which doesn't
@@ -62,15 +87,23 @@ function deriveCross(baseSeries: Bar[], quoteSeries: Bar[]): Bar[] {
 const CACHE_TTL_MS = 5 * 60 * 1000;
 let cachedResult: { series: SeriesBySymbol; fetchedAt: number } | null = null;
 
-export async function getMarketData(): Promise<{ series: SeriesBySymbol; isMockData: boolean }> {
+export async function getMarketData(): Promise<{
+  series: SeriesBySymbol;
+  isMockData: boolean;
+  dataFetchedAt: string;
+}> {
   const apiKey = process.env.TWELVE_DATA_API_KEY;
 
   if (!apiKey) {
-    return { series: generateMockSeries(), isMockData: true };
+    return { series: generateMockSeries(), isMockData: true, dataFetchedAt: new Date().toISOString() };
   }
 
   if (cachedResult && Date.now() - cachedResult.fetchedAt < CACHE_TTL_MS) {
-    return { series: cachedResult.series, isMockData: false };
+    return {
+      series: cachedResult.series,
+      isMockData: false,
+      dataFetchedAt: new Date(cachedResult.fetchedAt).toISOString(),
+    };
   }
 
   const url = new URL(TWELVE_DATA_BASE);
@@ -84,19 +117,27 @@ export async function getMarketData(): Promise<{ series: SeriesBySymbol; isMockD
 
   if ("status" in json && json.status === "error") {
     // Serve stale cached data rather than a hard error, if we have any.
-    if (cachedResult) return { series: cachedResult.series, isMockData: false };
+    if (cachedResult) {
+      return {
+        series: cachedResult.series,
+        isMockData: false,
+        dataFetchedAt: new Date(cachedResult.fetchedAt).toISOString(),
+      };
+    }
     throw new Error(`Twelve Data error: ${json.message ?? "request failed"}`);
   }
 
-  const series: SeriesBySymbol = {};
+  const rawSeries: SeriesBySymbol = {};
   for (const symbol of FETCHED_SYMBOLS) {
     const raw: SingleSymbolSeries =
       FETCHED_SYMBOLS.length === 1 ? (json as SingleSymbolSeries) : (json as Record<string, SingleSymbolSeries>)[symbol];
-    series[symbol] = parseSeries(raw, symbol);
+    rawSeries[symbol] = parseSeries(raw, symbol);
   }
 
+  const series = alignByCalendarDate(rawSeries);
   series[DERIVED_CROSS] = deriveCross(series["EUR/USD"], series["GBP/USD"]);
 
-  cachedResult = { series, fetchedAt: Date.now() };
-  return { series, isMockData: false };
+  const fetchedAt = Date.now();
+  cachedResult = { series, fetchedAt };
+  return { series, isMockData: false, dataFetchedAt: new Date(fetchedAt).toISOString() };
 }

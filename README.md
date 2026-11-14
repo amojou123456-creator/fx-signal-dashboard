@@ -25,6 +25,15 @@ Without an API key, the dashboard runs on deterministic mock data (clearly
 labeled in the UI) so you can see everything working before paying for a
 subscription.
 
+**On Twelve Data's plans:** the free Basic plan allows only 8 API
+credits/minute, and this app's single batched request costs exactly 8 (one
+per tracked symbol). That leaves no margin — a second load within the same
+minute, or a cold serverless start right after another, will hit the limit.
+The in-memory cache (5-minute TTL, see `src/lib/marketData.ts`) covers normal
+personal use, but for reliable day-to-day use the paid **Grow** plan ($79/mo,
+or less billed yearly) removes the daily cap and gives much more per-minute
+headroom. Basic is fine for trying it out.
+
 ## Run
 
 ```bash
@@ -51,15 +60,32 @@ relationships that normally move together (or opposite) are monitored
   down" and a signal fires on whichever pair underperformed its usual
   partner, expecting reversion (mean-reversion heuristic — not guaranteed).
 
-**Win rate** — computed by walking back through the last 90 days, replaying
-the same divergence rule at every point in history, and checking whether
-price moved in the predicted direction within the next 5 bars. This is a real
-backtest of this exact rule, not an assumed number.
+**Win rate** — computed by walking back through the last ~2 years (500
+trading days), replaying the same divergence rule at every point in history,
+and checking whether price moved in the predicted direction within the next 5
+bars. This is a real backtest of this exact rule, not an assumed number. A
+win rate from fewer than 30 fired signals is hidden (shown as "insufficient
+history" instead) rather than displayed as a misleadingly confident
+percentage — a thin sample doesn't distinguish a real edge from a lucky
+streak.
 
-**Known simplification to revisit later:** bars across symbols are aligned by
-array position, not matched by calendar date. Daily FX/gold series are mostly
-aligned day-for-day; small mismatches around holidays aren't corrected for
-yet.
+**Calendar-date alignment** — bars across symbols are matched by date key
+(`src/lib/marketData.ts` → `alignByCalendarDate`), not by array position. An
+earlier version zipped arrays by index, which could silently misattribute one
+symbol's return to the wrong date on another if a provider gap ever desynced
+the series — this was flagged and fixed after a multi-perspective review.
+
+**Data freshness** — the dashboard shows when the underlying market data was
+actually fetched (not just when the page rendered), and flags it visibly if
+it's more than 10 minutes old, so a rate-limited or stale fetch is never
+silently acted on.
+
+**Open items (flagged by review, not yet addressed):** no null-baseline
+comparison (what a random entry would score on the same pairs), no
+expectancy/risk-reward accounting alongside win rate, no position-sizing or
+stop-loss guidance, and no handling for a correlation relationship breaking
+down for a real structural reason (e.g. a central bank policy shift) rather
+than reverting as expected.
 
 ## Editing what's tracked
 
@@ -71,6 +97,7 @@ Edit `src/lib/config.ts`:
 ## Possible later phases
 
 - Intraday bars instead of daily (needs a higher Twelve Data tier)
-- Calendar-date-aligned series instead of position-aligned
+- Null-baseline comparison and expectancy/risk-reward per signal, not just win rate
+- Position-sizing and stop-loss guidance
 - Push/email alerts when a new signal fires
 - Wrap as a native mobile app (Capacitor/React Native) once the strategy proves useful

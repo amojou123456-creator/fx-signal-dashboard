@@ -5,6 +5,7 @@ import { StrengthMeter } from "@/components/StrengthMeter";
 import { SignalCard } from "@/components/SignalCard";
 import { FlowDiagram } from "@/components/FlowDiagram";
 import { GoldChart } from "@/components/GoldChart";
+import { DataFreshness } from "@/components/DataFreshness";
 import type { DashboardData } from "@/lib/types";
 
 export default function Home() {
@@ -84,9 +85,7 @@ export default function Home() {
               )}
             </div>
 
-            <p className="text-right text-[10px] text-neutral-600">
-              As of {new Date(data.asOf).toLocaleString()}
-            </p>
+            <DataFreshness dataFetchedAt={data.dataFetchedAt} isMockData={data.isMockData} />
           </div>
         )}
       </div>
