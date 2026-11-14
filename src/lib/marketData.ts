@@ -53,11 +53,24 @@ function deriveCross(baseSeries: Bar[], quoteSeries: Bar[]): Bar[] {
   return out;
 }
 
+// Explicit in-memory cache (on top of Next's own fetch cache, which doesn't
+// reliably survive across serverless invocations for this route). The free
+// Twelve Data tier allows only 8 credits/minute and this call costs exactly
+// 8, so any two fetches within the same minute — e.g. two page loads, or a
+// cold start right after another — exhaust it. A 5-minute TTL matches the
+// dashboard's own polling interval (see page.tsx) and leaves real headroom.
+const CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedResult: { series: SeriesBySymbol; fetchedAt: number } | null = null;
+
 export async function getMarketData(): Promise<{ series: SeriesBySymbol; isMockData: boolean }> {
   const apiKey = process.env.TWELVE_DATA_API_KEY;
 
   if (!apiKey) {
     return { series: generateMockSeries(), isMockData: true };
+  }
+
+  if (cachedResult && Date.now() - cachedResult.fetchedAt < CACHE_TTL_MS) {
+    return { series: cachedResult.series, isMockData: false };
   }
 
   const url = new URL(TWELVE_DATA_BASE);
@@ -66,10 +79,12 @@ export async function getMarketData(): Promise<{ series: SeriesBySymbol; isMockD
   url.searchParams.set("outputsize", String(OUTPUT_SIZE));
   url.searchParams.set("apikey", apiKey);
 
-  const res = await fetch(url.toString(), { next: { revalidate: 300 } });
+  const res = await fetch(url.toString(), { cache: "no-store" });
   const json = (await res.json()) as TwelveDataBatchResponse;
 
   if ("status" in json && json.status === "error") {
+    // Serve stale cached data rather than a hard error, if we have any.
+    if (cachedResult) return { series: cachedResult.series, isMockData: false };
     throw new Error(`Twelve Data error: ${json.message ?? "request failed"}`);
   }
 
@@ -82,5 +97,6 @@ export async function getMarketData(): Promise<{ series: SeriesBySymbol; isMockD
 
   series[DERIVED_CROSS] = deriveCross(series["EUR/USD"], series["GBP/USD"]);
 
+  cachedResult = { series, fetchedAt: Date.now() };
   return { series, isMockData: false };
 }
