@@ -5,7 +5,7 @@
 // mechanically generated" philosophy — it's a descriptive snapshot, not a
 // validated trading strategy on its own.
 
-import { CURRENCIES, FX_PAIRS } from "./config";
+import { CURRENCIES, FX_PAIRS, LIVE_LOOKBACK_BARS } from "./config";
 import type { CurrencyStrength, SeriesBySymbol } from "./types";
 
 function pctChange(bars: { close: number }[], lookback: number): number {
@@ -15,7 +15,7 @@ function pctChange(bars: { close: number }[], lookback: number): number {
   return (recent - past) / past;
 }
 
-export function computeCurrencyStrength(series: SeriesBySymbol, lookbackBars = 5): CurrencyStrength[] {
+export function computeCurrencyStrength(series: SeriesBySymbol, lookbackBars = LIVE_LOOKBACK_BARS): CurrencyStrength[] {
   const contributions: Record<string, number[]> = Object.fromEntries(CURRENCIES.map((c) => [c, []]));
 
   for (const pair of FX_PAIRS) {

@@ -4,9 +4,7 @@ export function CorrelationTab({ relationships }: { relationships: RelationshipS
   return (
     <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
       <h2 className="mb-3 text-sm font-semibold text-neutral-300">קשרי קורלציה מנוטרים</h2>
-      <p className="mb-3 text-xs text-neutral-500">
-        מבוסס על נתונים יומיים (אותו מנוע שמפעיל את הסיגנלים) — לא על תוך-יומי.
-      </p>
+      <p className="mb-3 text-xs text-neutral-500">מבוסס על אותם נתונים יומיים שמפעילים את מנוע הסיגנלים.</p>
       <div className="space-y-2">
         {relationships.map((rel) => (
           <div

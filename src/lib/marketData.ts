@@ -1,20 +1,29 @@
-// Fetches market data from Twelve Data in two separate tracks:
-//   - Daily bars, long history: feeds the correlation-divergence signal
-//     engine and its backtest. Kept on daily bars deliberately (not
-//     intraday) so the backtest stays statistically meaningful — see
-//     signals.ts for why a short/noisy sample was the council's top concern.
-//   - Intraday bars, short history: feeds the "live" Currency Flow Map and
-//     Strength Ranking display only. Needs a paid plan with intraday access.
+// Fetches daily close history for every tracked symbol from Twelve Data, in a
+// single batched request (one HTTP call, multiple symbols comma-separated).
 // Falls back to deterministic mock data when no API key is configured.
+//
+// This one call serves both the long-history backtest/signal engine AND the
+// "live" Currency Flow Map / Strength Ranking / Market Overview panels (with
+// a short lookback — see LIVE_LOOKBACK_BARS in config.ts). A separate
+// intraday feed would need its own batched call, and on Twelve Data's free
+// Basic plan (8 credits/minute) even this single 8-symbol call already uses
+// the full budget — a second call in the same minute would 429. This app
+// stays on one call by choice, matching the plan the user is on.
 
-import { ALL_SYMBOLS, BACKTEST_LOOKBACK_DAYS, LOOKBACK_BASELINE, TimeframeOption } from "./config";
-import { generateMockIntradaySeries, generateMockSeries } from "./mock";
+import { FX_PAIRS, GOLD_SYMBOL, BACKTEST_LOOKBACK_DAYS, LOOKBACK_BASELINE } from "./config";
+import { generateMockSeries } from "./mock";
 import type { Bar, SeriesBySymbol } from "./types";
 
 const TWELVE_DATA_BASE = "https://api.twelvedata.com/time_series";
 
-// Enough daily history for the 90-bar baseline correlation plus the backtest window.
-const DAILY_OUTPUT_SIZE = LOOKBACK_BASELINE + BACKTEST_LOOKBACK_DAYS + 10;
+// Enough history for the 90-bar baseline correlation plus the backtest window.
+const OUTPUT_SIZE = LOOKBACK_BASELINE + BACKTEST_LOOKBACK_DAYS + 10;
+
+const DERIVED_CROSS = "EUR/GBP";
+const FETCHED_SYMBOLS = [
+  ...FX_PAIRS.map((p) => p.symbol).filter((s) => s !== DERIVED_CROSS),
+  GOLD_SYMBOL,
+];
 
 interface SingleSymbolSeries {
   status?: string;
@@ -37,9 +46,8 @@ function parseSeries(raw: SingleSymbolSeries, symbol: string): Bar[] {
 // previously zipped by array position, so a missing/extra bar for any one
 // symbol (a data-provider gap, a holiday handled inconsistently) silently
 // shifted every downstream correlation and signal calculation without any
-// error. This keeps only the dates/timestamps present in every tracked
-// symbol, in order — used for both the daily and intraday series.
-function alignByDateKey(series: SeriesBySymbol): SeriesBySymbol {
+// error. This keeps only the dates present in every tracked symbol, in order.
+function alignByCalendarDate(series: SeriesBySymbol): SeriesBySymbol {
   const symbols = Object.keys(series);
   if (symbols.length === 0) return series;
 
@@ -58,90 +66,77 @@ function alignByDateKey(series: SeriesBySymbol): SeriesBySymbol {
   return aligned;
 }
 
-async function fetchBatch(interval: string, outputsize: number, apiKey: string): Promise<SeriesBySymbol> {
+function deriveCross(baseSeries: Bar[], quoteSeries: Bar[]): Bar[] {
+  // Called after alignByCalendarDate, so both arrays already share the same
+  // dates in the same order — safe to zip by position here.
+  const len = Math.min(baseSeries.length, quoteSeries.length);
+  const out: Bar[] = [];
+  for (let i = 0; i < len; i++) {
+    out.push({ date: baseSeries[i].date, close: baseSeries[i].close / quoteSeries[i].close });
+  }
+  return out;
+}
+
+// Explicit in-memory cache (on top of Next's own fetch cache, which doesn't
+// reliably survive across serverless invocations for this route). The free
+// Twelve Data tier allows only 8 credits/minute and this call costs exactly
+// 8, so any two fetches within the same minute — e.g. two page loads, or a
+// cold start right after another — exhaust it. A 5-minute TTL matches the
+// dashboard's own polling interval and leaves real headroom.
+const CACHE_TTL_MS = 5 * 60 * 1000;
+let cachedResult: { series: SeriesBySymbol; fetchedAt: number } | null = null;
+
+export async function getMarketData(): Promise<{
+  series: SeriesBySymbol;
+  isMockData: boolean;
+  dataFetchedAt: string;
+}> {
+  const apiKey = process.env.TWELVE_DATA_API_KEY;
+
+  if (!apiKey) {
+    return { series: generateMockSeries(), isMockData: true, dataFetchedAt: new Date().toISOString() };
+  }
+
+  if (cachedResult && Date.now() - cachedResult.fetchedAt < CACHE_TTL_MS) {
+    return {
+      series: cachedResult.series,
+      isMockData: false,
+      dataFetchedAt: new Date(cachedResult.fetchedAt).toISOString(),
+    };
+  }
+
   const url = new URL(TWELVE_DATA_BASE);
-  url.searchParams.set("symbol", ALL_SYMBOLS.join(","));
-  url.searchParams.set("interval", interval);
-  url.searchParams.set("outputsize", String(outputsize));
+  url.searchParams.set("symbol", FETCHED_SYMBOLS.join(","));
+  url.searchParams.set("interval", "1day");
+  url.searchParams.set("outputsize", String(OUTPUT_SIZE));
   url.searchParams.set("apikey", apiKey);
 
   const res = await fetch(url.toString(), { cache: "no-store" });
   const json = (await res.json()) as TwelveDataBatchResponse;
 
   if ("status" in json && json.status === "error") {
+    // Serve stale cached data rather than a hard error, if we have any.
+    if (cachedResult) {
+      return {
+        series: cachedResult.series,
+        isMockData: false,
+        dataFetchedAt: new Date(cachedResult.fetchedAt).toISOString(),
+      };
+    }
     throw new Error(`Twelve Data error: ${json.message ?? "request failed"}`);
   }
 
   const rawSeries: SeriesBySymbol = {};
-  for (const symbol of ALL_SYMBOLS) {
+  for (const symbol of FETCHED_SYMBOLS) {
     const raw: SingleSymbolSeries =
-      ALL_SYMBOLS.length === 1 ? (json as SingleSymbolSeries) : (json as Record<string, SingleSymbolSeries>)[symbol];
+      FETCHED_SYMBOLS.length === 1 ? (json as SingleSymbolSeries) : (json as Record<string, SingleSymbolSeries>)[symbol];
     rawSeries[symbol] = parseSeries(raw, symbol);
   }
-  return alignByDateKey(rawSeries);
-}
 
-// Explicit in-memory caches (on top of Next's own fetch cache, which doesn't
-// reliably survive across serverless invocations for this route).
-interface CacheEntry {
-  series: SeriesBySymbol;
-  fetchedAt: number;
-}
-const DAILY_CACHE_TTL_MS = 15 * 60 * 1000; // daily bars don't need refreshing often
-const INTRADAY_CACHE_TTL_MS = 2 * 60 * 1000; // short, for a "live" feel
-let dailyCache: CacheEntry | null = null;
-const intradayCacheByInterval = new Map<string, CacheEntry>();
+  const series = alignByCalendarDate(rawSeries);
+  series[DERIVED_CROSS] = deriveCross(series["EUR/USD"], series["GBP/USD"]);
 
-async function getCached(
-  cache: CacheEntry | null,
-  ttlMs: number,
-  fetcher: () => Promise<SeriesBySymbol>
-): Promise<CacheEntry> {
-  if (cache && Date.now() - cache.fetchedAt < ttlMs) return cache;
-  try {
-    const series = await fetcher();
-    return { series, fetchedAt: Date.now() };
-  } catch (err) {
-    if (cache) return cache; // serve stale data rather than a hard error, if we have any
-    throw err;
-  }
-}
-
-export async function getDailySeries(): Promise<{
-  series: SeriesBySymbol;
-  isMockData: boolean;
-  dataFetchedAt: string;
-}> {
-  const apiKey = process.env.TWELVE_DATA_API_KEY;
-  if (!apiKey) {
-    return { series: generateMockSeries(), isMockData: true, dataFetchedAt: new Date().toISOString() };
-  }
-
-  const entry = await getCached(dailyCache, DAILY_CACHE_TTL_MS, () =>
-    fetchBatch("1day", DAILY_OUTPUT_SIZE, apiKey)
-  );
-  dailyCache = entry;
-  return { series: entry.series, isMockData: false, dataFetchedAt: new Date(entry.fetchedAt).toISOString() };
-}
-
-export async function getIntradaySeries(timeframe: TimeframeOption): Promise<{
-  series: SeriesBySymbol;
-  isMockData: boolean;
-  dataFetchedAt: string;
-}> {
-  const apiKey = process.env.TWELVE_DATA_API_KEY;
-  if (!apiKey) {
-    return {
-      series: generateMockIntradaySeries(timeframe.bars),
-      isMockData: true,
-      dataFetchedAt: new Date().toISOString(),
-    };
-  }
-
-  const cached = intradayCacheByInterval.get(timeframe.interval) ?? null;
-  const entry = await getCached(cached, INTRADAY_CACHE_TTL_MS, () =>
-    fetchBatch(timeframe.interval, timeframe.bars, apiKey)
-  );
-  intradayCacheByInterval.set(timeframe.interval, entry);
-  return { series: entry.series, isMockData: false, dataFetchedAt: new Date(entry.fetchedAt).toISOString() };
+  const fetchedAt = Date.now();
+  cachedResult = { series, fetchedAt };
+  return { series, isMockData: false, dataFetchedAt: new Date(fetchedAt).toISOString() };
 }

@@ -11,19 +11,18 @@ import { MarketOverviewTab } from "@/components/MarketOverviewTab";
 import { CorrelationTab } from "@/components/CorrelationTab";
 import { NewsTab } from "@/components/NewsTab";
 import { EconomicCalendarTab } from "@/components/EconomicCalendarTab";
-import { DEFAULT_TIMEFRAME, GOLD_SYMBOL } from "@/lib/config";
+import { GOLD_SYMBOL } from "@/lib/config";
 import type { DashboardData } from "@/lib/types";
 
 export default function Home() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabKey>("strength");
-  const [timeframe, setTimeframe] = useState(DEFAULT_TIMEFRAME);
 
-  async function load(tf: string) {
+  async function load() {
     setError(null);
     try {
-      const res = await fetch(`/api/signals?timeframe=${encodeURIComponent(tf)}`);
+      const res = await fetch("/api/signals");
       const json = await res.json();
       if (!res.ok) throw new Error(json.error ?? "טעינה נכשלה");
       setData(json);
@@ -33,17 +32,19 @@ export default function Home() {
   }
 
   useEffect(() => {
+    // Matches the data cache's 5-minute TTL in marketData.ts, so this poll
+    // reuses the cache rather than triggering a fresh (credit-costing) fetch.
     // eslint-disable-next-line react-hooks/set-state-in-effect
-    load(timeframe);
-    const interval = setInterval(() => load(timeframe), 2 * 60 * 1000);
+    load();
+    const interval = setInterval(load, 5 * 60 * 1000);
     return () => clearInterval(interval);
-  }, [timeframe]);
+  }, []);
 
   const goldRow = data?.marketOverview.find((r) => r.symbol === GOLD_SYMBOL);
 
   return (
     <div className="flex-1 bg-black text-neutral-100">
-      <NavBar activeTab={activeTab} onTabChange={setActiveTab} timeframe={timeframe} onTimeframeChange={setTimeframe} />
+      <NavBar activeTab={activeTab} onTabChange={setActiveTab} />
       <div className="mx-auto max-w-5xl px-4 py-6">
         <header className="mb-4">
           <h1 className="text-lg font-semibold">לוח סיגנלים — פורקס וזהב</h1>
@@ -86,11 +87,7 @@ export default function Home() {
             {activeTab === "news" && <NewsTab />}
             {activeTab === "calendar" && <EconomicCalendarTab />}
 
-            <DataFreshness
-              dailyDataFetchedAt={data.dailyDataFetchedAt}
-              intradayDataFetchedAt={data.intradayDataFetchedAt}
-              isMockData={data.isMockData}
-            />
+            <DataFreshness dataFetchedAt={data.dataFetchedAt} isMockData={data.isMockData} />
           </div>
         )}
       </div>

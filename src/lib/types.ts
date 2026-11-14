@@ -49,15 +49,9 @@ export interface MarketOverviewRow {
 export interface DashboardData {
   asOf: string;
   isMockData: boolean;
-  timeframe: string; // the timeframe label in effect for the intraday panels, e.g. "H1"
-  // Signals/backtest run on long daily history (see marketData.ts getDailySeries).
-  dailyDataFetchedAt: string;
+  dataFetchedAt: string; // when the single underlying daily batch was fetched
   signals: Signal[];
   relationships: RelationshipStatus[];
-  // Currency Flow Map + Strength Ranking + Market Overview run on short
-  // intraday history at the selected timeframe, for a "live" feel, kept
-  // separate from the backtest so it stays reliable regardless of timeframe.
-  intradayDataFetchedAt: string;
   strengths: CurrencyStrength[];
   marketOverview: MarketOverviewRow[];
   gold: GoldPoint[];
