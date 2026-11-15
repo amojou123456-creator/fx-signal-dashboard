@@ -1,11 +1,8 @@
+"use client";
+
+import { useEffect, useRef } from "react";
 import { CURRENCIES, FX_PAIRS, GOLD_SYMBOL } from "@/lib/config";
 import type { CurrencyStrength } from "@/lib/types";
-
-const WIDTH = 640;
-const HEIGHT = 480;
-const LABEL_X = 70;
-const NODE_X = WIDTH - 60;
-const TOP_MARGIN = 20;
 
 const GOLD_CODE = "GOLD";
 
@@ -18,6 +15,8 @@ export function FlowDiagram({
   strengths: CurrencyStrength[];
   goldChangePct: number | null;
 }) {
+  const canvasRef = useRef<HTMLCanvasElement>(null);
+
   const scoreByNode: Record<string, number> = { [GOLD_CODE]: goldChangePct ?? 0 };
   for (const c of CURRENCIES) {
     scoreByNode[c] = strengths.find((s) => s.currency === c)?.score ?? 0;
@@ -36,11 +35,6 @@ export function FlowDiagram({
   const pinned = goldScore >= usdScore ? [GOLD_CODE, "USD"] : ["USD", GOLD_CODE];
   const order = [...above, ...pinned, ...below];
 
-  const nodeIndex: Record<string, number> = {};
-  order.forEach((code, i) => (nodeIndex[code] = i));
-  const nodeStep = (HEIGHT - TOP_MARGIN * 2) / (order.length - 1 || 1);
-  const nodeY = (code: string) => TOP_MARGIN + nodeIndex[code] * nodeStep;
-
   const rowsWithGap = PAIR_ROWS.map((p) => {
     const baseScore = scoreByNode[p.base] ?? 0;
     const quoteScore = scoreByNode[p.quote] ?? 0;
@@ -49,116 +43,100 @@ export function FlowDiagram({
     return { ...p, strong, weak, gap: Math.abs(baseScore - quoteScore) };
   }).sort((a, b) => b.gap - a.gap);
 
-  const rowStep = (HEIGHT - TOP_MARGIN * 2) / (rowsWithGap.length - 1 || 1);
-  const midX = (LABEL_X + NODE_X) / 2;
+  const maxGap = Math.max(0.0001, ...rowsWithGap.map((r) => r.gap));
+
+  useEffect(() => {
+    const canvas = canvasRef.current;
+    const ctx = canvas?.getContext("2d");
+    if (!canvas || !ctx) return;
+
+    const dpr = window.devicePixelRatio || 1;
+    const rect = canvas.getBoundingClientRect();
+    canvas.width = rect.width * dpr;
+    canvas.height = rect.height * dpr;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    const W = rect.width;
+    const H = rect.height;
+    ctx.clearRect(0, 0, W, H);
+
+    const nodeStep = H / (order.length + 1);
+    const nodeY: Record<string, number> = {};
+    order.forEach((code, i) => (nodeY[code] = nodeStep * (i + 1)));
+
+    const rowStep = H / (rowsWithGap.length + 1);
+    const mid = W * 0.52;
+    const left = 2;
+    const right = W - 2;
+
+    function curve(y0: number, y1: number, rgb: string, alpha: number, width: number) {
+      ctx!.strokeStyle = `rgba(${rgb},${alpha})`;
+      ctx!.lineWidth = width;
+      ctx!.beginPath();
+      ctx!.moveTo(left, y0);
+      ctx!.bezierCurveTo(mid * 0.75, y0, mid, y1, right, y1);
+      ctx!.stroke();
+    }
+
+    rowsWithGap.forEach((row, i) => {
+      const y0 = rowStep * (i + 1);
+      const strength = Math.min(1, row.gap / maxGap);
+      curve(y0, nodeY[row.strong], "16,185,129", 0.1 + strength * 0.55, 0.6 + strength * 2.2);
+      curve(y0, nodeY[row.weak], "236,72,153", 0.08 + strength * 0.4, 0.6 + strength * 1.6);
+    });
+
+    ctx.strokeStyle = "rgba(255,255,255,0.07)";
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(mid, 0);
+    ctx.lineTo(mid, H);
+    ctx.stroke();
+  }, [order, rowsWithGap, maxGap]);
 
   return (
     <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
-      <h2 className="mb-1 text-sm font-semibold text-neutral-300">מפת זרימת כסף — מטבעות וזהב</h2>
+      <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-neutral-300">
+        <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+        מפת זרימת כסף — מטבעות וזהב
+      </h2>
       <p className="mb-3 text-xs text-neutral-500">
         USD ו-GOLD קבועים במרכז העמודה — כך קל לראות אילו מטבעות חזקים מהם כרגע (למעלה) ואילו חלשים מהם (למטה).
       </p>
-      <svg viewBox={`0 0 ${WIDTH} ${HEIGHT}`} className="mx-auto w-full">
-        <defs>
-          <filter id="line-glow" x="-50%" y="-50%" width="200%" height="200%">
-            <feGaussianBlur stdDeviation="1.6" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-          <filter id="hub-glow" x="-80%" y="-80%" width="260%" height="260%">
-            <feGaussianBlur stdDeviation="4" result="blur" />
-            <feMerge>
-              <feMergeNode in="blur" />
-              <feMergeNode in="SourceGraphic" />
-            </feMerge>
-          </filter>
-        </defs>
 
-        <rect
-          x={NODE_X - 46}
-          y={Math.min(nodeY("USD"), nodeY(GOLD_CODE)) - 20}
-          width={92}
-          height={Math.abs(nodeY("USD") - nodeY(GOLD_CODE)) + 40}
-          rx={18}
-          fill="rgba(14,165,233,0.08)"
-          stroke="rgba(14,165,233,0.35)"
-          strokeDasharray="3 3"
-        />
+      <div className="grid grid-cols-[1fr_88px] gap-2 rounded-xl border border-neutral-800 bg-black/40 p-2">
+        <canvas ref={canvasRef} className="h-[360px] w-full" />
+        <div className="flex flex-col justify-between py-1">
+          {order.map((code) => {
+            const score = scoreByNode[code];
+            const isPinned = code === "USD" || code === GOLD_CODE;
+            const positive = score >= 0;
+            const tone =
+              code === "USD"
+                ? "border-sky-400/60 bg-sky-400/10 text-sky-300"
+                : code === GOLD_CODE
+                  ? "border-amber-400/60 bg-amber-400/10 text-amber-300"
+                  : positive
+                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
+                    : "border-pink-500/40 bg-pink-500/10 text-pink-300";
+            return (
+              <div
+                key={code}
+                className={`flex items-center justify-between rounded-md border px-2 py-1 text-[11px] font-bold transition-all ${tone} ${
+                  isPinned ? "ring-1 ring-white/10" : ""
+                }`}
+              >
+                <span>{code}</span>
+                <span className="text-[10px] font-semibold opacity-90">
+                  {score >= 0 ? "+" : ""}
+                  {score.toFixed(2)}
+                </span>
+              </div>
+            );
+          })}
+        </div>
+      </div>
 
-        {rowsWithGap.map((row, i) => {
-          const y = TOP_MARGIN + i * rowStep;
-          const strongY = nodeY(row.strong);
-          const weakY = nodeY(row.weak);
-          const strongPath = `M ${LABEL_X + 58} ${y} C ${midX} ${y}, ${midX} ${strongY}, ${NODE_X - 34} ${strongY}`;
-          const weakPath = `M ${LABEL_X + 58} ${y} C ${midX} ${y}, ${midX} ${weakY}, ${NODE_X - 34} ${weakY}`;
-          return (
-            <g key={row.symbol}>
-              <path
-                d={strongPath}
-                fill="none"
-                stroke="#10b981"
-                strokeWidth={1.2}
-                strokeOpacity={0.5}
-                strokeLinecap="round"
-                strokeDasharray="5 5"
-                className="flow-line"
-                filter="url(#line-glow)"
-              />
-              <path
-                d={weakPath}
-                fill="none"
-                stroke="#ec4899"
-                strokeWidth={1.2}
-                strokeOpacity={0.4}
-                strokeLinecap="round"
-                strokeDasharray="5 5"
-                className="flow-line"
-                filter="url(#line-glow)"
-              />
-              <circle cx={LABEL_X + 50} cy={y} r={3} fill="#a3a3a3" />
-              <text x={LABEL_X + 40} y={y + 3} textAnchor="end" fontSize={10} fill="#d4d4d4" fontFamily="monospace">
-                {row.symbol.replace("/", "")}
-              </text>
-            </g>
-          );
-        })}
-
-        {order.map((code) => {
-          const y = nodeY(code);
-          const isPinned = code === "USD" || code === GOLD_CODE;
-          const score = scoreByNode[code];
-          const isPositive = score >= 0;
-          const stroke =
-            code === "USD" ? "#38bdf8" : code === GOLD_CODE ? "#fbbf24" : isPositive ? "#10b981" : "#ec4899";
-          const textColor =
-            code === "USD" ? "#7dd3fc" : code === GOLD_CODE ? "#fde047" : isPositive ? "#6ee7b7" : "#fca5a5";
-          return (
-            <g key={code}>
-              <rect
-                x={NODE_X - 34}
-                y={y - 14}
-                width={68}
-                height={28}
-                rx={14}
-                fill="#0c1416"
-                stroke={stroke}
-                strokeWidth={isPinned ? 1.8 : 1.2}
-                filter={isPinned ? "url(#hub-glow)" : undefined}
-              />
-              <text x={NODE_X} y={y - 1} textAnchor="middle" fontSize={11} fontWeight={700} fill={textColor}>
-                {code}
-              </text>
-              <text x={NODE_X} y={y + 10} textAnchor="middle" fontSize={8} fill="#8a8a8a">
-                {score >= 0 ? "+" : ""}
-                {score.toFixed(2)}
-              </text>
-            </g>
-          );
-        })}
-      </svg>
-      <div className="mt-2 flex flex-wrap gap-4 text-xs text-neutral-500">
+      <div className="mt-3 flex flex-wrap gap-4 text-xs text-neutral-500">
         <span className="flex items-center gap-1">
           <span className="h-2 w-2 rounded-full bg-emerald-500" /> זורם לכיוון המטבע החזק בזוג
         </span>
@@ -168,6 +146,34 @@ export function FlowDiagram({
         <span className="flex items-center gap-1">
           <span className="h-2 w-2 rounded-full border border-sky-400" /> USD ו-GOLD קבועים במרכז
         </span>
+      </div>
+
+      <h3 className="mb-2 mt-4 text-xs font-semibold text-neutral-400">זוגות עם פער החוזק הגדול ביותר</h3>
+      <div className="space-y-1.5">
+        {rowsWithGap.slice(0, 8).map((row) => {
+          const pct = Math.round((row.gap / maxGap) * 100);
+          const buy = row.strong === row.base;
+          return (
+            <div
+              key={row.symbol}
+              className="grid grid-cols-[52px_1fr_74px] items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950/50 px-2 py-1.5 text-[11px]"
+            >
+              <span
+                className={`rounded px-1.5 py-0.5 text-center font-bold ${
+                  buy
+                    ? "border border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
+                    : "border border-pink-500/40 bg-pink-500/10 text-pink-400"
+                }`}
+              >
+                {buy ? "קנייה" : "מכירה"}
+              </span>
+              <span className="h-1.5 overflow-hidden rounded-full bg-pink-500/60">
+                <span className="block h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
+              </span>
+              <span className="text-left font-mono font-bold text-neutral-300">{row.symbol.replace("/", "")}</span>
+            </div>
+          );
+        })}
       </div>
     </div>
   );
