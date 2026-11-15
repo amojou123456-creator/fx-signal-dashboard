@@ -54,6 +54,7 @@ export function FlowDiagram({
   const vsPct = Math.min(95, Math.max(5, 50 + (vsDiff / (2 * vsMax)) * 50));
   const vsFlat = Math.abs(vsDiff) < vsMax * 0.08;
   const vsWinner: "usd" | "gold" | "flat" = vsFlat ? "flat" : vsDiff > 0 ? "gold" : "usd";
+  const vsStrengthPct = Math.round(vsWinner === "usd" ? 100 - vsPct : vsPct);
 
   useEffect(() => {
     const canvas = canvasRef.current;
@@ -126,6 +127,7 @@ export function FlowDiagram({
                 ? "🥇 הכסף נוטה כרגע לכיוון הזהב"
                 : "💵 הכסף נוטה כרגע לכיוון הדולר"}
           </span>
+          {!vsFlat && <span className="vsPct">עוצמה {vsStrengthPct}%</span>}
         </div>
         <div className="vsBar">
           <span className="vsLabel usd">USD</span>
@@ -252,6 +254,15 @@ export function FlowDiagram({
         }
         .vsWinner.flat {
           color: var(--m);
+        }
+        .vsPct {
+          margin-right: 8px;
+          font-size: 11px;
+          font-weight: 700;
+          color: var(--m);
+          background: rgba(255, 255, 255, 0.06);
+          border-radius: 6px;
+          padding: 2px 7px;
         }
         .vsBar {
           display: flex;
