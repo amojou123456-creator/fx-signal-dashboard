@@ -45,6 +45,16 @@ export function FlowDiagram({
 
   const maxGap = Math.max(0.0001, ...rowsWithGap.map((r) => r.gap));
 
+  // Direct USD-vs-GOLD verdict: the single highest-level answer to "where is
+  // the money going right now" that the detailed ranking above doesn't spell
+  // out on its own (you'd have to notice which of the two pinned chips sits
+  // on top). This turns that into one explicit headline + gauge.
+  const vsDiff = goldScore - usdScore;
+  const vsMax = Math.max(Math.abs(usdScore), Math.abs(goldScore), 0.01);
+  const vsPct = Math.min(95, Math.max(5, 50 + (vsDiff / (2 * vsMax)) * 50));
+  const vsFlat = Math.abs(vsDiff) < vsMax * 0.08;
+  const vsWinner: "usd" | "gold" | "flat" = vsFlat ? "flat" : vsDiff > 0 ? "gold" : "usd";
+
   useEffect(() => {
     const canvas = canvasRef.current;
     const ctx = canvas?.getContext("2d");
@@ -65,116 +75,353 @@ export function FlowDiagram({
     order.forEach((code, i) => (nodeY[code] = nodeStep * (i + 1)));
 
     const rowStep = H / (rowsWithGap.length + 1);
-    const mid = W * 0.52;
-    const left = 2;
-    const right = W - 2;
+    const xm = W * 0.5;
+    const x0 = 2;
+    const x1 = W - 2;
 
-    function curve(y0: number, y1: number, rgb: string, alpha: number, width: number) {
-      ctx!.strokeStyle = `rgba(${rgb},${alpha})`;
-      ctx!.lineWidth = width;
+    // Same two-segment bezier shape as the reference design: every curve bends
+    // through the canvas's vertical center (not through its own target's y),
+    // which is what produces the fanned "flow" look instead of straight lines.
+    function curve(y0: number, y1: number, rgb: string, a: number) {
+      ctx!.strokeStyle = `rgba(${rgb},${0.08 + a * 0.5})`;
+      ctx!.lineWidth = 0.6 + a * 1.4;
       ctx!.beginPath();
-      ctx!.moveTo(left, y0);
-      ctx!.bezierCurveTo(mid * 0.75, y0, mid, y1, right, y1);
+      ctx!.moveTo(x0, y0);
+      ctx!.bezierCurveTo(xm * 0.7, y0, xm * 0.9, H / 2, xm, H / 2 * 0.5 + y0 * 0.1 + y1 * 0.4);
+      ctx!.bezierCurveTo(xm * 1.2, y1, x1 - 40, y1, x1, y1);
       ctx!.stroke();
     }
 
     rowsWithGap.forEach((row, i) => {
       const y0 = rowStep * (i + 1);
       const strength = Math.min(1, row.gap / maxGap);
-      curve(y0, nodeY[row.strong], "16,185,129", 0.1 + strength * 0.55, 0.6 + strength * 2.2);
-      curve(y0, nodeY[row.weak], "236,72,153", 0.08 + strength * 0.4, 0.6 + strength * 1.6);
+      curve(y0, nodeY[row.strong], "74,222,128", strength);
+      curve(y0, nodeY[row.weak], "248,113,113", strength * 0.8);
     });
 
-    ctx.strokeStyle = "rgba(255,255,255,0.07)";
+    ctx.strokeStyle = "rgba(255,255,255,0.08)";
     ctx.lineWidth = 1;
     ctx.beginPath();
-    ctx.moveTo(mid, 0);
-    ctx.lineTo(mid, H);
+    ctx.moveTo(xm, 0);
+    ctx.lineTo(xm, H);
     ctx.stroke();
   }, [order, rowsWithGap, maxGap]);
 
   return (
-    <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
-      <h2 className="mb-1 flex items-center gap-2 text-sm font-semibold text-neutral-300">
-        <span className="h-2 w-2 animate-pulse rounded-full bg-emerald-500" />
+    <div className="fd">
+      <h1>
+        <span className="dot" />
         מפת זרימת כסף — מטבעות וזהב
-      </h2>
-      <p className="mb-3 text-xs text-neutral-500">
-        USD ו-GOLD קבועים במרכז העמודה — כך קל לראות אילו מטבעות חזקים מהם כרגע (למעלה) ואילו חלשים מהם (למטה).
-      </p>
+      </h1>
+      <div className="sub">
+        חוזק יחסי של 8 מטבעות וזהב — USD ו-GOLD קבועים במרכז כך שקל לראות מה חזק מהם (למעלה) ומה חלש מהם (למטה)
+      </div>
 
-      <div className="grid grid-cols-[1fr_88px] gap-2 rounded-xl border border-neutral-800 bg-black/40 p-2">
-        <canvas ref={canvasRef} className="h-[360px] w-full" />
-        <div className="flex flex-col justify-between py-1">
+      <div className="vs">
+        <div className="vsHead">
+          <span className={`vsWinner ${vsWinner}`}>
+            {vsWinner === "flat"
+              ? "⚖ הדולר והזהב מאוזנים כרגע"
+              : vsWinner === "gold"
+                ? "🥇 הכסף נוטה כרגע לכיוון הזהב"
+                : "💵 הכסף נוטה כרגע לכיוון הדולר"}
+          </span>
+        </div>
+        <div className="vsBar">
+          <span className="vsLabel usd">USD</span>
+          <div className="vsTrack">
+            <i className="vsFill" style={{ width: `${vsPct}%` }} />
+            <b className="vsPointer" style={{ left: `${vsPct}%` }} />
+          </div>
+          <span className="vsLabel gold">GOLD</span>
+        </div>
+      </div>
+
+      <div className="stage">
+        <canvas ref={canvasRef} />
+        <div className="cur">
           {order.map((code) => {
             const score = scoreByNode[code];
-            const isPinned = code === "USD" || code === GOLD_CODE;
-            const positive = score >= 0;
-            const tone =
-              code === "USD"
-                ? "border-sky-400/60 bg-sky-400/10 text-sky-300"
-                : code === GOLD_CODE
-                  ? "border-amber-400/60 bg-amber-400/10 text-amber-300"
-                  : positive
-                    ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-300"
-                    : "border-pink-500/40 bg-pink-500/10 text-pink-300";
+            const pinned = code === "USD" || code === GOLD_CODE;
+            const kind = pinned ? (code === "USD" ? "usd" : "gold") : score >= 0 ? "pos" : "neg";
             return (
-              <div
-                key={code}
-                className={`flex items-center justify-between rounded-md border px-2 py-1 text-[11px] font-bold transition-all ${tone} ${
-                  isPinned ? "ring-1 ring-white/10" : ""
-                }`}
-              >
+              <div key={code} className={`chip ${kind}`}>
                 <span>{code}</span>
-                <span className="text-[10px] font-semibold opacity-90">
+                <small>
                   {score >= 0 ? "+" : ""}
                   {score.toFixed(2)}
-                </span>
+                </small>
               </div>
             );
           })}
         </div>
       </div>
 
-      <div className="mt-3 flex flex-wrap gap-4 text-xs text-neutral-500">
-        <span className="flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full bg-emerald-500" /> זורם לכיוון המטבע החזק בזוג
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full bg-pink-500" /> זורם לכיוון המטבע החלש בזוג
-        </span>
-        <span className="flex items-center gap-1">
-          <span className="h-2 w-2 rounded-full border border-sky-400" /> USD ו-GOLD קבועים במרכז
-        </span>
-      </div>
-
-      <h3 className="mb-2 mt-4 text-xs font-semibold text-neutral-400">זוגות עם פער החוזק הגדול ביותר</h3>
-      <div className="space-y-1.5">
-        {rowsWithGap.slice(0, 8).map((row) => {
-          const pct = Math.round((row.gap / maxGap) * 100);
+      <h2>
+        זוגות עם הפער הגדול ביותר <span>{rowsWithGap.length} מתוך {rowsWithGap.length}</span>
+      </h2>
+      <div id="pairs">
+        {rowsWithGap.map((row) => {
           const buy = row.strong === row.base;
+          const pct = Math.min(99, Math.round(50 + (row.gap / maxGap) * 50));
           return (
-            <div
-              key={row.symbol}
-              className="grid grid-cols-[52px_1fr_74px] items-center gap-2 rounded-md border border-neutral-800 bg-neutral-950/50 px-2 py-1.5 text-[11px]"
-            >
-              <span
-                className={`rounded px-1.5 py-0.5 text-center font-bold ${
-                  buy
-                    ? "border border-emerald-500/40 bg-emerald-500/10 text-emerald-400"
-                    : "border border-pink-500/40 bg-pink-500/10 text-pink-400"
-                }`}
-              >
-                {buy ? "קנייה" : "מכירה"}
-              </span>
-              <span className="h-1.5 overflow-hidden rounded-full bg-pink-500/60">
-                <span className="block h-full rounded-full bg-emerald-500" style={{ width: `${pct}%` }} />
-              </span>
-              <span className="text-left font-mono font-bold text-neutral-300">{row.symbol.replace("/", "")}</span>
+            <div className="row" key={row.symbol}>
+              <div className={`sig ${buy ? "buy" : "sell"}`}>{buy ? "קנייה" : "מכירה"}</div>
+              <div>
+                <div className="track">
+                  <i style={{ width: `${buy ? pct : 100 - pct}%` }} />
+                </div>
+                <div className="meta">
+                  פער חוזק {row.gap.toFixed(2)} · עוצמה {pct}%
+                </div>
+              </div>
+              <div className="pair">{row.symbol.replace("/", "")}</div>
             </div>
           );
         })}
       </div>
+
+      <div className="foot">
+        שיטת החישוב: לכל מטבע מחושב חוזק יחסי מתוך השינוי היומי שלו מול שאר המטבעות הנמדדים (ולזהב — מהשינוי היומי
+        שלו מול הדולר). &quot;קנייה&quot; = מטבע הבסיס בזוג חזק מהמטבע המצוטט כרגע, &quot;מכירה&quot; = ההפך — זהו
+        שיקוף של החוזק היחסי הרגעי, לא סיגנל מסחר. לסיגנלים מבוססי Backtest אמיתי ראו את הטבלה &quot;נגד הרוב&quot;
+        למטה.
+      </div>
+
+      <style jsx>{`
+        .fd {
+          --bg: #07100f;
+          --panel: #0d1917;
+          --line: #1e3330;
+          --g: #4ade80;
+          --r: #f87171;
+          --t: #e6f2ef;
+          --m: #7f9a95;
+          background: radial-gradient(900px 500px at 50% -10%, #0f2a27, var(--bg));
+          color: var(--t);
+          border-radius: 16px;
+          padding: 16px;
+        }
+        h1 {
+          font-size: 15px;
+          font-weight: 600;
+          display: flex;
+          align-items: center;
+          gap: 8px;
+          margin: 0;
+          color: var(--t);
+        }
+        .dot {
+          width: 8px;
+          height: 8px;
+          border-radius: 50%;
+          background: var(--g);
+          box-shadow: 0 0 10px var(--g);
+          animation: fd-pulse 1.4s infinite;
+        }
+        @keyframes fd-pulse {
+          50% {
+            opacity: 0.25;
+          }
+        }
+        .sub {
+          color: var(--m);
+          font-size: 12px;
+          margin: 4px 0 12px;
+        }
+        .vs {
+          background: var(--panel);
+          border: 1px solid var(--line);
+          border-radius: 14px;
+          padding: 12px 14px;
+          margin-bottom: 10px;
+        }
+        .vsHead {
+          text-align: center;
+          margin-bottom: 8px;
+        }
+        .vsWinner {
+          font-size: 13px;
+          font-weight: 700;
+        }
+        .vsWinner.usd {
+          color: #7dd3fc;
+        }
+        .vsWinner.gold {
+          color: #fde047;
+        }
+        .vsWinner.flat {
+          color: var(--m);
+        }
+        .vsBar {
+          display: flex;
+          align-items: center;
+          gap: 8px;
+        }
+        .vsLabel {
+          font-size: 11px;
+          font-weight: 800;
+          letter-spacing: 0.5px;
+        }
+        .vsLabel.usd {
+          color: #7dd3fc;
+        }
+        .vsLabel.gold {
+          color: #fde047;
+        }
+        .vsTrack {
+          position: relative;
+          flex: 1;
+          height: 10px;
+          border-radius: 6px;
+          background: linear-gradient(90deg, rgba(56, 189, 248, 0.18), rgba(30, 41, 59, 0.5) 50%, rgba(251, 191, 36, 0.18));
+          overflow: visible;
+        }
+        .vsFill {
+          position: absolute;
+          inset: 0;
+          width: 50%;
+          border-radius: 6px;
+          background: linear-gradient(90deg, rgba(56, 189, 248, 0.55), rgba(251, 191, 36, 0.55));
+          transition: width 0.6s;
+        }
+        .vsPointer {
+          position: absolute;
+          top: -3px;
+          width: 3px;
+          height: 16px;
+          border-radius: 2px;
+          background: #fff;
+          box-shadow: 0 0 6px rgba(255, 255, 255, 0.7);
+          transform: translateX(-50%);
+          transition: left 0.6s;
+        }
+        .stage {
+          display: grid;
+          grid-template-columns: 1fr 92px;
+          gap: 8px;
+          background: var(--panel);
+          border: 1px solid var(--line);
+          border-radius: 16px;
+          padding: 10px;
+        }
+        canvas {
+          width: 100%;
+          height: 340px;
+          display: block;
+        }
+        .cur {
+          display: flex;
+          flex-direction: column;
+          gap: 5px;
+          justify-content: space-between;
+        }
+        .chip {
+          border-radius: 9px;
+          padding: 5px 8px;
+          font-weight: 700;
+          font-size: 13px;
+          display: flex;
+          justify-content: space-between;
+          border: 1px solid;
+          transition: all 0.6s;
+        }
+        .chip small {
+          font-weight: 600;
+          opacity: 0.9;
+        }
+        .pos {
+          background: rgba(74, 222, 128, 0.12);
+          border-color: rgba(74, 222, 128, 0.45);
+          color: var(--g);
+        }
+        .neg {
+          background: rgba(248, 113, 113, 0.12);
+          border-color: rgba(248, 113, 113, 0.45);
+          color: var(--r);
+        }
+        .usd {
+          background: rgba(56, 189, 248, 0.14);
+          border-color: rgba(56, 189, 248, 0.6);
+          color: #7dd3fc;
+        }
+        .gold {
+          background: rgba(251, 191, 36, 0.14);
+          border-color: rgba(251, 191, 36, 0.6);
+          color: #fde047;
+        }
+        h2 {
+          font-size: 13px;
+          margin: 14px 0 8px;
+          display: flex;
+          justify-content: space-between;
+          color: var(--t);
+        }
+        h2 span {
+          color: var(--m);
+          font-weight: 400;
+          font-size: 11px;
+        }
+        .row {
+          display: grid;
+          grid-template-columns: 64px 1fr 74px;
+          gap: 10px;
+          align-items: center;
+          background: var(--panel);
+          border: 1px solid var(--line);
+          border-radius: 12px;
+          padding: 9px 12px;
+          margin-bottom: 6px;
+        }
+        .sig {
+          border-radius: 8px;
+          text-align: center;
+          padding: 5px 0;
+          font-size: 12px;
+          font-weight: 700;
+          border: 1px solid;
+        }
+        .sig.buy {
+          color: var(--g);
+          border-color: var(--g);
+          background: rgba(74, 222, 128, 0.1);
+        }
+        .sig.sell {
+          color: var(--r);
+          border-color: var(--r);
+          background: rgba(248, 113, 113, 0.1);
+        }
+        .track {
+          height: 7px;
+          border-radius: 5px;
+          background: var(--r);
+          overflow: hidden;
+          direction: ltr;
+        }
+        .track i {
+          display: block;
+          height: 100%;
+          background: var(--g);
+          transition: width 0.6s;
+        }
+        .meta {
+          font-size: 11px;
+          color: var(--m);
+          margin-top: 5px;
+        }
+        .pair {
+          font-weight: 800;
+          direction: ltr;
+          text-align: left;
+          letter-spacing: 0.3px;
+        }
+        .foot {
+          color: var(--m);
+          font-size: 11px;
+          margin-top: 14px;
+          line-height: 1.6;
+        }
+      `}</style>
     </div>
   );
 }
