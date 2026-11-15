@@ -73,10 +73,8 @@ export default function Home() {
           <div className="space-y-4">
             {activeTab === "strength" && (
               <>
-                <div className="grid gap-4 md:grid-cols-2">
-                  <FlowDiagram rows={data.marketOverview} />
-                  <StrengthMeter strengths={data.strengths} goldChangePct={goldRow?.changePct ?? null} />
-                </div>
+                <FlowDiagram strengths={data.strengths} goldChangePct={goldRow?.changePct ?? null} />
+                <StrengthMeter strengths={data.strengths} goldChangePct={goldRow?.changePct ?? null} />
                 <GoldChart points={data.gold} />
                 <AgainstMajority signals={data.signals} />
               </>
