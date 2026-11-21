@@ -4,6 +4,11 @@ export function AgainstMajority({ signals }: { signals: Signal[] }) {
   return (
     <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
       <h2 className="mb-3 text-sm font-semibold text-neutral-300">נגד הרוב</h2>
+      <p className="mb-3 text-[10px] leading-relaxed text-neutral-500">
+        ⚠ &quot;אישורים&quot; = כמה מהיחסים הנוספים שבמעקב מתנהגים חריג במקביל — לא עדות בלתי-תלויה: כמה מהזוגות
+        חולקים דולר כרגל בסיס, כך שתנועת דולר אחת יכולה &quot;לאשר&quot; כמה יחסים בבת אחת. בדיקת ה-Backtest גם
+        בוצעה על תקופה היסטורית אחת (כ-2 שנים) בלי אימות מחוץ לתקופה — אחוז ההצלחה משקף את העבר, לא הבטחה לעתיד.
+      </p>
       {signals.length === 0 ? (
         <p className="text-xs text-neutral-500">
           אין סיגנלים כרגע — זה תקין, האסטרטגיה מדווחת רק כשקשר שבר את ההתנהגות הרגילה שלו.

@@ -50,6 +50,9 @@ export interface DashboardData {
   asOf: string;
   isMockData: boolean;
   dataFetchedAt: string; // when the single underlying daily batch was fetched
+  latestBarDate: string; // trading date of the most recent daily close in that batch —
+  // distinct from dataFetchedAt: a fetch "2 minutes ago" can still carry yesterday's
+  // close if today's bar hasn't printed yet, so this is the honest "as of" date
   signals: Signal[];
   relationships: RelationshipStatus[];
   strengths: CurrencyStrength[];

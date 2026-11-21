@@ -18,10 +18,14 @@ export async function GET() {
     const strengths = computeCurrencyStrength(series, LIVE_LOOKBACK_BARS);
     const marketOverview = computeMarketOverview(series, LIVE_LOOKBACK_BARS);
 
+    const goldBars = series[GOLD_SYMBOL] ?? [];
+    const latestBarDate = goldBars.length > 0 ? goldBars[goldBars.length - 1].date : asOf;
+
     const payload: DashboardData = {
       asOf,
       isMockData,
       dataFetchedAt,
+      latestBarDate,
       signals,
       relationships,
       strengths,

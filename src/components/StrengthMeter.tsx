@@ -13,8 +13,8 @@ export function StrengthMeter({
     <div className="rounded-lg border border-neutral-800 bg-neutral-900 p-4">
       <h2 className="mb-3 flex items-center gap-2 text-sm font-semibold text-neutral-300">
         חוזק מטבעות
-        <span className="rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-normal text-emerald-400">
-          חי
+        <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-[10px] font-normal text-neutral-400">
+          סגירה יומית
         </span>
       </h2>
       <div className="space-y-2">

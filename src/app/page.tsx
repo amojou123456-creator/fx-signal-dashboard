@@ -85,7 +85,11 @@ export default function Home() {
             {activeTab === "news" && <NewsTab />}
             {activeTab === "calendar" && <EconomicCalendarTab />}
 
-            <DataFreshness dataFetchedAt={data.dataFetchedAt} isMockData={data.isMockData} />
+            <DataFreshness
+              dataFetchedAt={data.dataFetchedAt}
+              latestBarDate={data.latestBarDate}
+              isMockData={data.isMockData}
+            />
           </div>
         )}
       </div>
