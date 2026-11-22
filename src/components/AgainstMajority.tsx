@@ -8,6 +8,8 @@ export function AgainstMajority({ signals }: { signals: Signal[] }) {
         ⚠ &quot;אישורים&quot; = כמה מהיחסים הנוספים שבמעקב מתנהגים חריג במקביל — לא עדות בלתי-תלויה: כמה מהזוגות
         חולקים דולר כרגל בסיס, כך שתנועת דולר אחת יכולה &quot;לאשר&quot; כמה יחסים בבת אחת. בדיקת ה-Backtest גם
         בוצעה על תקופה היסטורית אחת (כ-2 שנים) בלי אימות מחוץ לתקופה — אחוז ההצלחה משקף את העבר, לא הבטחה לעתיד.
+        אחוז הצלחה לבד לא אומר כלום בלי &quot;יחס תגמול&quot;: יחס מתחת ל-1 אומר שבממוצע ההפסדים גדולים מהרווחים, גם
+        אם אחוז ההצלחה גבוה.
       </p>
       {signals.length === 0 ? (
         <p className="text-xs text-neutral-500">
@@ -34,6 +36,18 @@ export function AgainstMajority({ signals }: { signals: Signal[] }) {
                 <span className="w-16 shrink-0 font-mono text-neutral-200">{s.pair.replace("/", "")}</span>
                 <span className="w-12 shrink-0 text-right font-mono text-neutral-300">
                   {s.winRatePct != null ? `${s.winRatePct}%` : "—"}
+                </span>
+                <span
+                  className={`w-14 shrink-0 text-right font-mono text-[11px] ${
+                    s.payoffRatio != null
+                      ? s.payoffRatio >= 1
+                        ? "text-emerald-400"
+                        : "text-pink-400"
+                      : "text-neutral-500"
+                  }`}
+                  title="יחס תגמול: גודל רווח ממוצע חלקי גודל הפסד ממוצע (Backtest)"
+                >
+                  {s.payoffRatio != null ? `יחס ${s.payoffRatio}` : "—"}
                 </span>
                 <span
                   className={`w-20 shrink-0 text-right font-mono ${

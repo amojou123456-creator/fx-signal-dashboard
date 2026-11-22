@@ -110,7 +110,12 @@ function backtestWinRate(
   returnsA: number[],
   returnsB: number[],
   sign: 1 | -1
-): { winRatePct: number | null; sampleSize: number; historicalPips: number | null } {
+): {
+  winRatePct: number | null;
+  sampleSize: number;
+  historicalPips: number | null;
+  payoffRatio: number | null;
+} {
   const minStart = LOOKBACK_BASELINE;
   const maxEnd = returnsA.length - BACKTEST_HORIZON_BARS;
   const earliestEnd = Math.max(minStart, returnsA.length - BACKTEST_LOOKBACK_DAYS);
@@ -119,6 +124,12 @@ function backtestWinRate(
   let wins = 0;
   let total = 0;
   let totalPips = 0;
+  // Tracked separately from totalPips so the UI can show a payoff ratio
+  // (avg win size vs avg loss size) alongside win rate — the council flagged
+  // that a bare win-rate % is meaningless without it: a high win rate with
+  // small wins and rare-but-large losses can still lose money on average.
+  let winPipsSum = 0;
+  let lossPipsSum = 0; // stored as a positive magnitude
 
   for (let end = earliestEnd; end < maxEnd; end++) {
     const check = checkDivergence(returnsA, returnsB, sign, end);
@@ -137,17 +148,27 @@ function backtestWinRate(
 
     total += 1;
     totalPips += signedPips;
-    if (won) wins += 1;
+    if (won) {
+      wins += 1;
+      winPipsSum += signedPips;
+    } else {
+      lossPipsSum += Math.abs(signedPips);
+    }
   }
 
   // Below MIN_SAMPLE_SIZE fired events, a win rate (and pip total) is
   // statistically unreliable and showing a confident-looking number would be
   // misleading — the UI shows "insufficient history" instead.
   const reliable = total >= MIN_SAMPLE_SIZE;
+  const losses = total - wins;
+  const avgWinPips = wins > 0 ? winPipsSum / wins : 0;
+  const avgLossPips = losses > 0 ? lossPipsSum / losses : 0;
+
   return {
     winRatePct: reliable ? Number(((wins / total) * 100).toFixed(1)) : null,
     sampleSize: total,
     historicalPips: reliable ? Number(totalPips.toFixed(1)) : null,
+    payoffRatio: reliable && avgLossPips > 0 ? Number((avgWinPips / avgLossPips).toFixed(2)) : null,
   };
 }
 
@@ -195,7 +216,13 @@ export function computeSignals(series: SeriesBySymbol, asOf: string): Signal[] {
     const live = checkDivergence(returnsA, returnsB, rel.sign, returnsA.length);
     if (!live.triggered || !live.direction) continue;
 
-    const { winRatePct, sampleSize, historicalPips } = backtestWinRate(rel.a, barsA, returnsA, returnsB, rel.sign);
+    const { winRatePct, sampleSize, historicalPips, payoffRatio } = backtestWinRate(
+      rel.a,
+      barsA,
+      returnsA,
+      returnsB,
+      rel.sign
+    );
 
     candidates.push({
       pair: rel.a,
@@ -207,6 +234,7 @@ export function computeSignals(series: SeriesBySymbol, asOf: string): Signal[] {
       winRatePct,
       sampleSize,
       historicalPips,
+      payoffRatio,
       confirmationCount: 0, // filled below, once every candidate is known
       asOf,
     });

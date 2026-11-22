@@ -22,6 +22,7 @@ export interface Signal {
   winRatePct: number | null; // null if not enough backtest history
   sampleSize: number; // number of past occurrences used for the win rate
   historicalPips: number | null; // cumulative backtested pips; null if sample too thin
+  payoffRatio: number | null; // avg win pips / avg loss pips on backtested trades; null if sample too thin
   confirmationCount: number; // how many other monitored relationships are also diverging right now
   asOf: string;
 }
